@@ -1,8 +1,27 @@
-# Train Tracks Switches detection
+# Train Tracks segmentation and Switches classification
 By Andrei-Robert Alexandrescu, 931
+(Dataset: RailSem19 https://wilddash.cc/railsem19)
 
 ## Contents
 ### Files
-- dataset.py: used for loading the images
-Note: all images are of the same size, thus there is no need for custom resizing. The
-regular resize operations should do.
+
+- seg: contains the segmentation files
+	- dataset.py: dataloader for semantic segmentation. An item is a pair (image,mask).
+	- model.py: UNet model implementation
+	- model_resunet.py: ResUNet model implementation
+	- model_resunetpp.py: ResUNet++ model implementation
+	- train.py: where the training takes place
+	- utils.py
+
+- cla: contains the classification files
+	- bounding_boxes.py: script for extracting only the desired bounding boxes from the raw dataset
+	- image_generator.py: takes the images from the bounding_boxes.py script,
+	selects the bounding boxes and creates a dataset based on three hyperparameters
+	alpha, beta, gamma discussed in the paper in the dataset subsection of Methodology.
+	- dataset.py: dataloader for switches. An item is a pair (image,class)
+	- main.py: where the training takes place
+	- utils.py
+	- models:
+		- vgg.py: allows for multiple sizes (11, 13, 16, 19)
+		- resnet.py
+	
