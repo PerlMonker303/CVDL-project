@@ -31,16 +31,17 @@ NO_CLASSES = 1  # number of output classes besides the background - keep it 1 fo
 
 
 CLASSES = ['switch-left', 'switch-right']
-ALPHA = 1.45
+ALPHA = 1.35
+BETA = 30
 USE_MASKS = False
 PLOT_GRAPHS = True
 SAVE_GRAPHS = True  # if this is True, then plots will be saved to GRAPHS_SAVE_DIR, if False then displayed
-GRAPHS_SAVE_DIR = f'training_results/a_{format_alpha(ALPHA)}/'
-LABELS_PATH = './data/labels_mtn.txt'
+GRAPHS_SAVE_DIR = 'training_results/'
 
 TOTAL_IMAGES = 20
 TRAIN_IMAGES = 10
 VAL_IMAGES = 5
+SHUFFLE_IMAGES = True
 
 
 def get_loaders(
@@ -125,20 +126,22 @@ def train_fn(loader, model, optimizer, loss_fn, scaler):
 
 
 def main():
-    image_dir = f'{BASE_DATA_DIR}a_{format_alpha(ALPHA)}/image'
+    image_dir = f'{BASE_DATA_DIR}b_{BETA}/a_{format_alpha(ALPHA)}/image'
     if USE_MASKS:
         image_dir = f'{BASE_DATA_DIR}a_{format_alpha(ALPHA)}/mask'
+    labels_path = f'{BASE_DATA_DIR}b_{BETA}/a_{format_alpha(ALPHA)}/labels.txt'
     # Data loaders initialization
     train_loader, val_loader = get_loaders(
         image_dir,
-        LABELS_PATH,
+        labels_path,
         ALPHA,
         BATCH_SIZE,
         NUM_WORKERS,
         PIN_MEMORY,
         TOTAL_IMAGES,
         TRAIN_IMAGES,
-        VAL_IMAGES
+        VAL_IMAGES,
+        SHUFFLE_IMAGES
     )
 
     # Model declaration
@@ -147,6 +150,9 @@ def main():
 
     # Declaration of the optimizer
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+    # Declaration of the scheduler
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2, verbose=True)
 
     # Declaration of the loss function
     loss_fn = nn.BCEWithLogitsLoss()
@@ -243,6 +249,9 @@ def main():
         }
         save_checkpoint(checkpoint, f"{SAVE_PATH}test_remove_{epoch}.pth.tar")
         print(f'[... done]')
+
+        # call scheduler
+        scheduler.step(loss)
 
         print(f'[Epoch: {epoch} ... done]')
 
