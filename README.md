@@ -11,6 +11,7 @@ By Andrei-Robert Alexandrescu, 931
 	- model_resunet.py: ResUNet model implementation
 	- model_resunetpp.py: ResUNet++ model implementation
 	- train.py: where the training takes place
+	- video_inference.py: for creating demo videos
 	- utils.py
 
 - cla: contains the classification files

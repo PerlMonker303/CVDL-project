@@ -7,7 +7,7 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import confusion_matrix, roc_curve, roc_auc_score, RocCurveDisplay
+from sklearn.metrics import confusion_matrix, roc_curve, roc_auc_score, RocCurveDisplay, jaccard_score, f1_score
 import torch.nn as nn
 import cv2
 
@@ -28,11 +28,12 @@ def save_checkpoint(state, filename="my_checkpoint.pth.tar"):
 def load_checkpoint(checkpoint, model):
     print("=> Loading checkpoint")
     model.load_state_dict(checkpoint["state_dict"])
-    return checkpoint["epoch"], torch.as_tensor(checkpoint["loss_history"]), torch.as_tensor(checkpoint["iou_history_train"]),\
-           torch.as_tensor(checkpoint["iou_history_val"]), torch.as_tensor(checkpoint["iou_rails_history_train"]), \
-           torch.as_tensor(checkpoint["iou_rails_history_val"]), torch.as_tensor(checkpoint["iou_bg_history_train"]),\
-           torch.as_tensor(checkpoint["iou_bg_history_val"]), torch.as_tensor(checkpoint["dice_history_train"]), \
-           torch.as_tensor(checkpoint["dice_history_val"]), checkpoint["indices"], checkpoint["config"]
+    return checkpoint["epoch"], torch.as_tensor(checkpoint["loss_history_train"]), torch.as_tensor(checkpoint["loss_history_val"]),\
+            torch.as_tensor(checkpoint["iou_history_train"]), torch.as_tensor(checkpoint["iou_history_val"]),\
+            torch.as_tensor(checkpoint["iou_rails_history_train"]), torch.as_tensor(checkpoint["iou_rails_history_val"]),\
+            torch.as_tensor(checkpoint["iou_bg_history_train"]), torch.as_tensor(checkpoint["iou_bg_history_val"]),\
+            torch.as_tensor(checkpoint["dice_history_train"]), torch.as_tensor(checkpoint["dice_history_val"]),\
+            checkpoint["indices"], checkpoint["config"]
 
 
 def get_loaders(
@@ -52,6 +53,8 @@ def get_loaders(
     if train_images + val_images > total_images:
         print('[ERROR: total_images must be >= than train_images + val_images]')
         return None
+    if train_images + val_images != total_images:
+        print('[WARNING: train_images + val_images != total_images]')
     # generate indices
     if indices is None:
         indices = np.arange(total_images)
@@ -92,7 +95,7 @@ def get_loaders(
 
 
 def compute_metrics_different_thresholds(loader, model, thresholds, epoch, save_graphs=False, save_dir='/'):
-
+    print("[Computing metrics for different thresholds ...]")
     iou = torch.tensor([]).to(DEVICE)
     iou_rails = torch.tensor([]).to(DEVICE)
     iou_bg = torch.tensor([]).to(DEVICE)
@@ -116,20 +119,21 @@ def compute_metrics_different_thresholds(loader, model, thresholds, epoch, save_
         plt.savefig(f'{save_dir}th_epoch_{epoch}.png')
     else:
         plt.show()
+    print("[... done]")
 
 
-def compute_metrics(loader, model, threshold = 0.5):
+def compute_metrics(loader, model, threshold=0.5):
     '''
-    Computes the dice and iou scores
+    Computes the dice (f1) and iou scores (jaccard index)
     '''
+    model.eval()
+
     tp = torch.tensor(0).to(DEVICE)
     tp_bg = torch.tensor(0).to(DEVICE)
     tp_rails = torch.tensor(0).to(DEVICE)
     num_pixels = torch.tensor(0).to(DEVICE)
     num_pixels_rails = torch.tensor(0).to(DEVICE)
     epsilon = 1e-6
-    model.eval()
-
     with torch.no_grad():
         for x, y in loader:
             x = x.to(DEVICE)
@@ -152,7 +156,35 @@ def compute_metrics(loader, model, threshold = 0.5):
     iou = torch.mul(torch.div(tp, num_pixels), 100)
     iou_rails = torch.mul(torch.div(tp_rails, num_pixels_rails), 100)
     iou_bg = torch.mul(torch.div(tp_bg, (torch.subtract(num_pixels, num_pixels_rails))), 100)
-    dice_score = torch.mul(torch.div((torch.add(torch.mul(tp, 2), epsilon)), (torch.add(tp,  torch.add(num_pixels, epsilon)))), 100)
+    dice_score = torch.mul(
+    torch.div((torch.add(torch.mul(tp, 2), epsilon)), (torch.add(tp, torch.add(num_pixels, epsilon)))), 100)
+    '''
+    idx = 0
+    iou_rails = torch.tensor(0).to(DEVICE)
+    iou_bg = torch.tensor(0).to(DEVICE)
+    dice = torch.tensor(0).to(DEVICE)
+
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(DEVICE)
+            y = y.to(DEVICE)
+            preds = model(x)
+            preds = torch.where(preds > threshold, 1, 0)
+
+            ious = jaccard_score(y.cpu().flatten(), preds.cpu().flatten(), average=None)
+            dice_l = f1_score(y.cpu().flatten(), preds.cpu().flatten())
+
+            iou_rails = torch.add(iou_rails, ious[0])
+            iou_bg = torch.add(iou_bg, ious[1])
+            dice = torch.add(dice, dice_l)
+
+            idx += 1
+
+    iou_rails = iou_rails / idx * 100
+    iou_bg = iou_bg / idx * 100
+    iou = (iou_rails + iou_bg) / 2
+    dice_score = dice / idx * 100
+    '''
     model.train()
 
     return iou, iou_rails, iou_bg, dice_score
@@ -162,7 +194,7 @@ def save_predictions_as_imgs(
     epoch, batch_size, loader, model, score_dice, score_iou, score_iou_rail, threshold=0.5, folder="saved_images/", rows=4
 ):
     # rows = maximum no. of samples to display
-    image_path = f'{folder}/dice{score_dice:.2f}_iou{score_iou:.2f}_iourail{score_iou_rail:.2f}_e{epoch}.png'
+    image_path = f'{folder}dice{score_dice:.2f}_iou{score_iou:.2f}_iourail{score_iou_rail:.2f}_e{epoch}.png'
     total_x = torch.tensor([]).to(DEVICE)
     total_y = torch.tensor([]).to(DEVICE)
     total_preds = torch.tensor([]).to(DEVICE)
@@ -231,6 +263,7 @@ def compute_ratio(train_loader, val_loader):
     return bg_pixels / rail_pixels
     # 0.0265 for rail_pixels / bg_pixels
     # 37.7584 for bg_pixels / rail_pixels
+    # 36 for cropped ds
 
 
 def plot_confusion_matrices_different_thresholds(loader, model, thresholds, epoch):
@@ -259,7 +292,6 @@ def plot_confusion_matrices_different_thresholds(loader, model, thresholds, epoc
         col = idx % 2
         preds_current = predictions_total[idx]
         conf_mat = confusion_matrix(y_total, preds_current)
-        tn, fp, fn, tp = conf_mat.ravel()
         sns.heatmap(conf_mat, annot=True, cmap='Blues', ax=ax[row][col])
         ax[row][col].title.set_text(f'Threshold: {th:.1f}')
         ax[row][col].set_xlabel('Actual Values ')
@@ -288,19 +320,19 @@ def plot_roc_curve_custom(loader, model, epoch, save_graphs=False, save_dir='/')
     display = RocCurveDisplay(fpr=fpr, tpr=tpr, roc_auc=roc_auc, estimator_name="Segmentation estimator")
     display.plot()
     if save_graphs:
-        # plt.savefig(f'{save_dir}roc_epoch_{epoch}')
-        pass
+        plt.savefig(f'{save_dir}roc_epoch_{epoch}')
     else:
         plt.show()
 
     return roc_auc
 
 
-def display_result_graph(loss_history, dice_history_train, dice_history_val, iou_history_train, iou_history_val, iou_rails_history_train,
+def display_result_graph(loss_history_train, loss_history_val, dice_history_train, dice_history_val, iou_history_train, iou_history_val, iou_rails_history_train,
                          iou_rails_history_val, save_graphs=False, save_dir='/'):
     fig, ax = plt.subplots(nrows=2, ncols=2)
     # loss graph
-    ax[0][0].plot(loss_history.cpu().detach().numpy())
+    ax[0][0].plot(loss_history_train.cpu().detach().numpy(), label="Training")
+    ax[0][0].plot(loss_history_val.cpu().detach().numpy(), label="Validation")
     ax[0][0].set_xlabel('Epochs')
     ax[0][0].set_ylabel('Loss')
     # dice graph
@@ -319,26 +351,8 @@ def display_result_graph(loss_history, dice_history_train, dice_history_val, iou
     ax[1][1].set_xlabel('Epochs')
     ax[1][1].set_ylabel('IoU Rails score')
     plt.legend()
+    
     if save_graphs:
-        plt.savefig(f'{save_dir}epoch_{len(loss_history.cpu().detach().numpy()) - 1}')
+        plt.savefig(f'{save_dir}epoch_{len(loss_history_train.cpu().detach().numpy()) - 1}')
     else:
         plt.show()
-
-
-# PyTorch
-class DiceLoss(nn.Module):
-    def __init__(self, weight=None, size_average=True):
-        super(DiceLoss, self).__init__()
-
-    def forward(self, inputs, targets, smooth=1):
-        # comment out if your model contains a sigmoid or equivalent activation layer
-        # inputs = F.sigmoid(inputs)
-
-        # flatten label and prediction tensors
-        inputs = inputs.view(-1)
-        targets = targets.view(-1)
-
-        intersection = (inputs * targets).sum()
-        dice = (2. * intersection + smooth) / (inputs.sum() + targets.sum() + smooth)
-
-        return 1 - dice

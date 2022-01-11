@@ -45,7 +45,8 @@ def load_checkpoint(checkpoint, model):
     print("=> Loading checkpoint")
     model.load_state_dict(checkpoint["state_dict"])
     return checkpoint["epoch"], \
-           torch.as_tensor(checkpoint["loss_history"]), \
+           torch.as_tensor(checkpoint["loss_history_train"]), \
+           torch.as_tensor(checkpoint["loss_history_val"]), \
            torch.as_tensor(checkpoint["accuracies_history_train"]),\
            torch.as_tensor(checkpoint["accuracies_history_val"]), \
            torch.as_tensor(checkpoint["precision_history_train"]), \
@@ -79,6 +80,8 @@ def compute_metrics(loader, model):
 
     model.train()
 
+    '''
+    # METRICS FOR SWITCH PROBLEM
     conf_mat = confusion_matrix(y_total, predictions_total)
     recall = np.diag(conf_mat) / np.sum(conf_mat, axis=1)
     # recall = recall_score(y_total, predictions_total, average='samples')
@@ -105,6 +108,22 @@ def compute_metrics(loader, model):
            torch.tensor(f1 * 100), \
            torch.tensor(auc * 100)
 
+    '''
+
+    # METRICS FOR CIFAR-10 PROBLEM
+    conf_mat = confusion_matrix(y_total, predictions_total)
+    accuracies = conf_mat.diagonal() / conf_mat.sum(axis=1)
+    precision = np.diag(conf_mat) / np.sum(conf_mat, axis=0)
+    recall = np.diag(conf_mat) / np.sum(conf_mat, axis=1)
+    f1 = 2 * recall * precision / (recall + precision)
+    print(accuracies)
+
+    return torch.tensor([np.mean(accuracies),np.mean(accuracies),np.mean(accuracies)]),\
+           torch.tensor([np.mean(precision),np.mean(precision),np.mean(precision)]),\
+           torch.tensor([np.mean(recall),np.mean(recall),np.mean(recall)]),\
+           torch.tensor([np.mean(f1),np.mean(f1),np.mean(f1)]),\
+           torch.tensor(0)
+
 
 def display_metrics(accuracies, precision, recall, f1, auc):
     print(f"Accuracies: [{accuracies[0]:.2f}%, {accuracies[1]:.2f}%, {accuracies[2]:.2f}%]")
@@ -114,13 +133,14 @@ def display_metrics(accuracies, precision, recall, f1, auc):
     print(f"AUC: {auc:.2f}%")
 
 
-def display_result_graph(loss_history, accuracies_history_train, accuracies_history_val, precision_history_train,
+def display_result_graph(loss_history_train, loss_history_val, accuracies_history_train, accuracies_history_val, precision_history_train,
                          precision_history_val, recall_history_train, recall_history_val, f1_history_train,
                          f1_history_val, auc_history_train, auc_history_val,
                          save_graphs=False, save_dir='/'):
     fig, ax = plt.subplots(nrows=3, ncols=2)
     # loss graph
-    ax[0][0].plot(loss_history.cpu().detach().numpy())
+    ax[0][0].plot(loss_history_train.cpu().detach().numpy(), label="Training")
+    ax[0][0].plot(loss_history_val.cpu().detach().numpy(), label="Validation")
     ax[0][0].set_xlabel('Epochs')
     ax[0][0].set_ylabel('Loss')
     # accuracy graph
@@ -148,7 +168,8 @@ def display_result_graph(loss_history, accuracies_history_train, accuracies_hist
     ax[2][1].plot(auc_history_val.cpu().detach().numpy(), label="Validation")
     ax[2][1].set_xlabel('Epochs')
     ax[2][1].set_ylabel('Auc score')
+
     if save_graphs:
-        plt.savefig(f'{save_dir}epoch_{len(loss_history.cpu().detach().numpy())-1}')
+        plt.savefig(f'{save_dir}epoch_{len(loss_history_train.cpu().detach().numpy())-1}')
     else:
         plt.show()
